@@ -7,6 +7,7 @@
 #include <ctime>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #define PORT 7777
 #define ROWS 6
@@ -16,8 +17,10 @@ std::mutex mtx;
 
 class Game {
 public:
-    Game(int clientSocket) : clientSocket(clientSocket), currentPlayer('C') {
+    Game(int clientSocket, std::string clientAddr, int clientPort)
+        : clientSocket(clientSocket), currentPlayer('C'), clientAddr(clientAddr), clientPort(clientPort) {
         board.resize(ROWS, std::vector<char>(COLS, ' '));
+        log("inicia juego el cliente.");
     }
 
     void play() {
@@ -27,6 +30,7 @@ public:
                 handleClientMove();
                 if (checkWin('C')) {
                     sendMessage("Ganaste!\n");
+                    log("gana cliente.");
                     break;
                 }
                 currentPlayer = 'S';
@@ -34,22 +38,32 @@ public:
                 handleServerMove();
                 if (checkWin('S')) {
                     sendMessage("Gana el Servidor\n");
+                    log("gana servidor.");
                     break;
                 }
                 currentPlayer = 'C';
             }
             if (isBoardFull()) {
                 sendMessage("Empate\n");
+                log("empate.");
                 break;
             }
         }
         close(clientSocket);
+        log("fin del juego.");
     }
 
 private:
     int clientSocket;
     char currentPlayer;
     std::vector<std::vector<char>> board;
+    std::string clientAddr;
+    int clientPort;
+
+    void log(const std::string& message) {
+        std::lock_guard<std::mutex> lock(mtx);
+        std::cout << "Juego [" << clientAddr << ":" << clientPort << "]: " << message << std::endl;
+    }
 
     void sendMessage(const std::string& message) {
         send(clientSocket, message.c_str(), message.size(), 0);
@@ -64,6 +78,7 @@ private:
     void handleClientMove() {
         sendMessage("Tu turno. Ingresa la columna (1-7): ");
         int col = std::stoi(receiveMessage()) - 1;
+        log("cliente juega columna " + std::to_string(col + 1) + ".");
         makeMove(col, 'C');
         sendBoard();
     }
@@ -74,6 +89,7 @@ private:
         do {
             col = rand() % COLS;
         } while (board[0][col] != ' ');
+        log("servidor juega columna " + std::to_string(col + 1) + ".");
         makeMove(col, 'S');
         sendBoard();
     }
@@ -100,13 +116,13 @@ private:
     }
 
     bool checkWin(char player) {
-        // Check horizontal, vertical and diagonal conditions
+        // Check horizontal, vertical, and diagonal conditions
         for (int row = 0; row < ROWS; ++row) {
             for (int col = 0; col < COLS; ++col) {
                 if (checkDirection(row, col, 1, 0, player) || // Horizontal
                     checkDirection(row, col, 0, 1, player) || // Vertical
-                    checkDirection(row, col, 1, 1, player) || // Diagonal /
-                    checkDirection(row, col, 1, -1, player)) { // Diagonal \
+                    checkDirection(row, col, 1, 1, player) || // Diagonal 
+                    checkDirection(row, col, 1, -1, player)) { // Diagonal inversa
                     return true;
                 }
             }
@@ -140,8 +156,8 @@ private:
     }
 };
 
-void handleClient(int clientSocket) {
-    Game game(clientSocket);
+void handleClient(int clientSocket, std::string clientAddr, int clientPort) {
+    Game game(clientSocket, clientAddr, clientPort);
     game.play();
 }
 
@@ -156,7 +172,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+    if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
     }
@@ -175,16 +191,17 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Esperando conexiones ..." << std::endl;
-
     while (true) {
         if ((clientSocket = accept(serverFd, (struct sockaddr*)&address, (socklen_t*)&addrlen)) < 0) {
             perror("accept");
             exit(EXIT_FAILURE);
         }
 
-        std::cout << "Juego nuevo[" << inet_ntoa(address.sin_addr) << ":" << ntohs(address.sin_port) << "]" << std::endl;
-        std::thread t(handleClient, clientSocket);
+        std::string clientAddr = inet_ntoa(address.sin_addr);
+        int clientPort = ntohs(address.sin_port);
+        std::cout << "Juego nuevo[" << clientAddr << ":" << clientPort << "]" << std::endl;
+
+        std::thread t(handleClient, clientSocket, clientAddr, clientPort);
         t.detach();
     }
 
