@@ -3,8 +3,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#define PORT 7777
-
 void playGame(int sock) {
     char buffer[1024] = {0};
     while (true) {

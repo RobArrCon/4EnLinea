@@ -14,7 +14,7 @@
 #define COLS 7
 
 std::mutex mtx;
-bool waitingForClient = true; 
+bool waitingForClient = true;
 
 class Game {
 public:
@@ -137,7 +137,7 @@ private:
             for (int col = 0; col < COLS; ++col) {
                 if (checkDirection(row, col, 1, 0, player) || // Horizontal
                     checkDirection(row, col, 0, 1, player) || // Vertical
-                    checkDirection(row, col, 1, 1, player) || // Diagonal 
+                    checkDirection(row, col, 1, 1, player) || // Diagonal
                     checkDirection(row, col, 1, -1, player)) { // Diagonal inversa
                     return true;
                 }
@@ -175,12 +175,15 @@ private:
 };
 
 // Función para manejar la conexión de un cliente
-void handleClient(int clientSocket, std::string clientAddr, int clientPort) {
+void handleClient(int clientSocket, struct sockaddr_in clientAddr) {
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(clientAddr.sin_addr), ip, INET_ADDRSTRLEN);
+
     {
         std::lock_guard<std::mutex> lock(mtx);
         waitingForClient = false; // Cliente conectado, dejar de esperar
     }
-    Game game(clientSocket, clientAddr, clientPort);
+    Game game(clientSocket, std::string(ip), ntohs(clientAddr.sin_port));
     game.play();
     {
         std::lock_guard<std::mutex> lock(mtx);
@@ -191,7 +194,7 @@ void handleClient(int clientSocket, std::string clientAddr, int clientPort) {
 // Función para esperar y mostrar mensajes periódicos de espera de jugadores
 void waitForClients() {
     while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(5)); 
+        std::this_thread::sleep_for(std::chrono::seconds(5));
         std::lock_guard<std::mutex> lock(mtx);
         if (waitingForClient) {
             std::cout << "Esperando jugador..." << std::endl;
@@ -255,14 +258,21 @@ int main(int argc, char* argv[]) {
             exit(EXIT_FAILURE);
         }
 
-        std::string clientAddr = inet_ntoa(address.sin_addr);
-        int clientPort = ntohs(address.sin_port);
-        std::cout << "Juego nuevo[" << clientAddr << ":" << clientPort << "]" << std::endl;
+        struct sockaddr_in clientAddr;
+        socklen_t clientAddrLen = sizeof(clientAddr);
+        getpeername(clientSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
+
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(clientAddr.sin_addr), ip, INET_ADDRSTRLEN);
+        int clientPort = ntohs(clientAddr.sin_port);
+        std::cout << "Juego nuevo[" << ip << ":" << clientPort << "]" << std::endl;
 
         // Iniciar un nuevo hilo para manejar la conexión del cliente
-        std::thread t(handleClient, clientSocket, clientAddr, clientPort);
+        std::thread t(handleClient, clientSocket, clientAddr);
         t.detach();
     }
 
+
     return 0;
 }
+
